@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planilha Automática - Múltiplos Colaboradores (Realtime)</title>
+
+<!-- Seu CSS (mantive o estilo que você enviou) -->
+<style>
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    margin: 40px;
+    background: linear-gradient(120deg, #f3e8ff, #e0f7ff);
+    color: #333;
+  }
+  h1 {
+    text-align: center;
+    color: #4b0082;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 20px;
+    font-size: 14px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  th, td {
+    border: 1px solid #d6bcfa;
+    padding: 6px;
+    text-align: center;
+  }
+  th {
+    background: #6b21a8;
+    color: white;
+  }
+  tr:nth-child(even) { background: #faf5ff; }
+  tr:nth-child(odd) { background: #ffffff; }
+  input, select {
+    padding: 4px;
+    border: 1px solid #a78bfa;
+    border-radius: 4px;
+  }
+  button {
+    margin-top: 15px;
+    padding: 8px 16px;
+    background: #06b6d4;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  button:hover { background: #0891b2; }
+  #total {
+    margin-top: 15px;
+    font-weight: bold;
+    color: #4b0082;
+  }
+  #colaboradorSelect {
+    margin-right: 8px;
+    border: 1px solid #a78bfa;
+    border-radius: 4px;
+  }
+  #periodo {
+    font-weight: bold;
+    color: #4b0082;
+  }
+  .periodo-container {
+    margin-bottom: 20px;
+    text-align: center;
+  }
+</style>
+
+<!-- XLSX para exportar -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Firebase (compat build para usar firebase.database() e firebase.initializeApp) -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
+</head>
+<body>
+
+<h1>📋 Planilha de Alunos e Colaboradores (Realtime)</h1>
+
+<div class="periodo-container">
+  <label for="mesInput"><b>Selecionar Mês:</b></label>
+  <input type="month" id="mesInput">
+  <button onclick="salvarPeriodo()">Salvar Período</button>
+  <p id="periodo"></p>
+</div>
+
+<label>Colaborador: </label>
+<select id="colaboradorSelect" onchange="trocarColaborador()"></select>
+<button onclick="novoColaborador()">➕ Novo Colaborador</button>
+<button onclick="removerColaborador()">🗑️ Remover Colaborador</button>
+
+<br><br>
+
+<table id="planilha">
+  <thead>
+    <tr>
+      <th>Aluno</th>
+      <th>Modalidade</th>
+      <th>Tipo</th>
+      <th>Valor Base (R$)</th>
+      <th>Valor Extra (R$)</th>
+      <!-- dias 1..31 -->
+      <script>
+        for(let i=1; i<=31; i++){
+          document.write(`<th>${i}</th>`);
+        }
+      </script>
+      <th>Total</th>
+      <th>Ações</th>
+    </tr>
+  </thead>
+  <tbody id="corpoTabela"></tbody>
+</table>
+
+<button onclick="adicionarAluno()">➕ Adicionar Aluno</button>
+<button onclick="calcularTotal()">💰 Calcular Total</button>
+<button onclick="limparQuadradinhos()">🧹 Limpar Quadradinhos</button>
+<button onclick="exportarExcel()">📁 Exportar para Excel</button>
+
+<p id="total"></p>
+
+<script>
+/* ============================
+   CONFIGURAÇÃO FIREBASE (cole suas credenciais aqui)
+   Você já me passou as credenciais; mantive as mesmas.
+   ============================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyD9Er27RZlKcFVVwrnWfo2xvWkPUla9JRs",
+  authDomain: "colaboradores-5a2a2.firebaseapp.com",
+  databaseURL: "https://colaboradores-5a2a2-default-rtdb.firebaseio.com",
+  projectId: "colaboradores-5a2a2",
+  storageBucket: "colaboradores-5a2a2.firebasestorage.app",
+  messagingSenderId: "84321823380",
+  appId: "1:84321823380:web:4b962179789fff019aa281"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ============================
+   VARIÁVEIS GLOBAIS
+   ============================ */
+let corpoTabela = document.getElementById("corpoTabela");
+let colaboradorAtual = null;
+let colaboradoresLista = []; // nomes existentes
+let dadosLocalCache = {}; // cache local do colaborador atual
+let suspendSave = false; // flag para evitar loop de escrita quando aplicamos dados remotos
+let colListener = null; // handler para on() do colaborador atual
+let globalListener = null; // handler para lista de colaboradores
+
+/* ============================
+   PERÍODO MANUAL
+   ============================ */
+function atualizarPeriodoTexto(mesSelecionado) {
+  if (!mesSelecionado) {
+    document.getElementById("periodo").innerText = "";
+    return;
+  }
+  let [ano, mes] = mesSelecionado.split("-");
+  mes = Number(mes) - 1;
+  let inicio = new Date(ano, mes, 5);
+  let fim = new Date(ano, mes + 1, 4);
+  let opcoes = { month: 'short' };
+  document.getElementById("periodo").innerText =
+    `Período: ${inicio.getDate()}/${inicio.toLocaleDateString('pt-BR', opcoes)} a ${fim.getDate()}/${fim.toLocaleDateString('pt-BR', opcoes)}`;
+}
+
+async function carregarPeriodo() {
+  // tentamos carregar do DB (do colaborador atual quando ele existir)
+  let salvo = localStorage.getItem("periodoSelecionado"); // fallback local
+  let mesInput = document.getElementById("mesInput");
+  if (salvo) {
+    mesInput.value = salvo;
+    atualizarPeriodoTexto(salvo);
+  } else {
+    let hoje = new Date();
+    let mes = (hoje.getMonth() + 1).toString().padStart(2, "0");
+    let ano = hoje.getFullYear();
+    mesInput.value = `${ano}-${mes}`;
+    salvarPeriodo(); // salva automaticamente
+  }
+}
+
+async function salvarPeriodo() {
+  let mesSelecionado = document.getElementById("mesInput").value;
+  if (!mesSelecionado) return;
+  localStorage.setItem("periodoSelecionado", mesSelecionado);
+  atualizarPeriodoTexto(mesSelecionado);
+
+  if (!colaboradorAtual) return;
+  // salva no DB dentro do nó do colaborador para sincronizar entre dispositivos
+  try {
+    suspendSave = true;
+    await db.ref("colaboradores/" + colaboradorAtual + "/periodoSelecionado").set(mesSelecionado);
+  } finally {
+    setTimeout(()=> suspendSave = false, 50);
+  }
+}
+
+/* ============================
+   FUNÇÕES PRINCIPAIS (colaboradores / dados)
+   ============================ */
+
+async function attachGlobalListener() {
+  // Listener para a lista de colaboradores (mantém o select sincronizado)
+  const ref = db.ref("colaboradores");
+  if (globalListener) ref.off("value", globalListener);
+  globalListener = ref.on("value", snapshot => {
+    const val = snapshot.val() || {};
+    colaboradoresLista = Object.keys(val);
+    if (colaboradoresLista.length === 0) {
+      // cria um colaborador padrão se não houver nenhum
+      db.ref("colaboradores/Colaborador 1").set({ alunos: [], periodoSelecionado: document.getElementById("mesInput").value || "" });
+      return; // outro evento será disparado após criar
+    }
+    atualizarSelectColaboradores();
+  });
+}
+
+function atualizarSelectColaboradores() {
+  const select = document.getElementById("colaboradorSelect");
+  const antiga = select.value;
+  select.innerHTML = "";
+  colaboradoresLista.forEach(nome => {
+    let opt = document.createElement("option");
+    opt.value = nome;
+    opt.textContent = nome;
+    select.appendChild(opt);
+  });
+  // Prioriza manter o colaborador atual selecionado se existir
+  if (colaboradoresLista.includes(colaboradorAtual)) {
+    select.value = colaboradorAtual;
+  } else if (antiga && colaboradoresLista.includes(antiga)) {
+    colaboradorAtual = antiga;
+    select.value = colaboradorAtual;
+  } else {
+    // escolhe o primeiro
+    colaboradorAtual = colaboradoresLista[0];
+    select.value = colaboradorAtual;
+  }
+  // anexa listener do colaborador atual (dados)
+  attachColaboradorListener(colaboradorAtual);
+}
+
+function attachColaboradorListener(nomeColab) {
+  if (!nomeColab) return;
+  // remove listener antigo
+  if (colListener) {
+    db.ref("colaboradores/" + colListener).off("value");
+    colListener = null;
+  }
+  const path = "colaboradores/" + nomeColab;
+  colListener = nomeColab;
+  db.ref(path).on("value", snapshot => {
+    const data = snapshot.val() || { alunos: [], periodoSelecionado: null };
+    // aplicar dados no UI sem disparar salvamento
+    aplicarDadosRemotos(data);
+  });
+}
+
+function aplicarDadosRemotos(data) {
+  try {
+    suspendSave = true;
+    // popula a tabela com os alunos remotos
+    corpoTabela.innerHTML = "";
+    if (data.alunos && Array.isArray(data.alunos)) {
+      data.alunos.forEach(a => adicionarAluno(a, true));
+    }
+    // aplica período se presente
+    if (data.periodoSelecionado) {
+      document.getElementById("mesInput").value = data.periodoSelecionado;
+      atualizarPeriodoTexto(data.periodoSelecionado);
+      localStorage.setItem("periodoSelecionado", data.periodoSelecionado);
+    }
+    calcularTotal();
+  } finally {
+    // pequeno delay para evitar conflito entre eventos locais/remotos
+    setTimeout(()=> suspendSave = false, 60);
+  }
+}
+
+/* carregar lista de colaboradores ao iniciar */
+async function carregarColaboradores() {
+  // faz attach do listener global (ele vai criar um colaborador se necessário)
+  attachGlobalListener();
+}
+
+/* criar novo colaborador */
+async function novoColaborador() {
+  let nome = prompt("Digite o nome do novo colaborador:");
+  if (!nome) return;
+  // cria no DB
+  await db.ref("colaboradores/" + nome).set({
+    alunos: [],
+    periodoSelecionado: document.getElementById("mesInput").value || ""
+  });
+  colaboradorAtual = nome;
+  // atualizar select e listeners será feito pelo listener global automático
+}
+
+/* remover colaborador */
+async function removerColaborador() {
+  if (!colaboradorAtual) return;
+  if (!confirm(`Remover ${colaboradorAtual} e todos os dados dele?`)) return;
+  await db.ref("colaboradores/" + colaboradorAtual).remove();
+  colaboradorAtual = null;
+  // global listener vai definir outro colaborador automaticamente
+}
+
+/* trocar colaborador via select */
+function trocarColaborador() {
+  const sel = document.getElementById("colaboradorSelect");
+  const novo = sel.value;
+  if (!novo) return;
+  colaboradorAtual = novo;
+  // attachColaboradorListener será chamado por atualizarSelectColaboradores / global listener,
+  // mas chamamos aqui também pra garantir imediatidade
+  attachColaboradorListener(colaboradorAtual);
+  // carregar período salvo (se existir) será feito pelo listener do colaborador remoto
+}
+
+/* ============================
+   FUNÇÕES DE LINHA (aluno)
+   ============================ */
+
+function adicionarAluno(alunoData = null, isRemote=false) {
+  // alunoData: { nome, modalidade, tipo, valorBase, valorExtra, dias: [bool...] }
+  // isRemote: indica que o row foi criado a partir de dados remotos (para não salvar imediatamente)
+  let linha = document.createElement("tr");
+  linha.innerHTML = `
+    <td><input type="text" placeholder="Nome do aluno"></td>
+    <td>
+      <select>
+        <option value="Yoga">Yoga</option>
+        <option value="Pilates">Pilates</option>
+      </select>
+    </td>
+    <td>
+      <select class="tipoSelect">
+        <option value="Mensal">Mensal</option>
+        <option value="Gympass">Gympass</option>
+        <option value="TotalPass">TotalPass</option>
+      </select>
+    </td>
+    <td><input type="number" placeholder="Valor base" min="0" step="0.01"></td>
+    <td><input type="number" placeholder="Valor extra" min="0" step="0.01"></td>
+    ${Array.from({length: 31}, () => '<td><input type="checkbox"></td>').join('')}
+    <td class="total">0</td>
+    <td>
+      <button class="removerBtn">❌</button>
+      <button class="limparBtn">🧽</button>
+    </td>
+  `;
+
+  // append antes de preencher
+  corpoTabela.appendChild(linha);
+
+  // se vier com dados, popula
+  if (alunoData) {
+    let inputs = linha.querySelectorAll('input, select');
+    inputs[0].value = alunoData.nome || "";
+    inputs[1].value = alunoData.modalidade || "Yoga";
+    inputs[2].value = alunoData.tipo || "Mensal";
+    inputs[3].value = alunoData.valorBase || 0;
+    inputs[4].value = alunoData.valorExtra || 0;
+    // dias: preencher checkboxes
+    const dias = Array.isArray(alunoData.dias) ? alunoData.dias : [];
+    for (let i = 0; i < 31; i++) {
+      const cb = inputs[5 + i];
+      if (cb && typeof dias[i] !== "undefined") cb.checked = !!dias[i];
+    }
+  }
+
+  // eventos
+  const allInputs = linha.querySelectorAll("input, select");
+  allInputs.forEach(el => {
+    el.addEventListener("input", () => {
+      // tipo especial para select tipo (Gympass / TotalPass)
+      if (el.classList && el.classList.contains("tipoSelect")) {
+        const tipo = el.value;
+        const valorBaseInput = linha.querySelectorAll('input[type="number"]')[0];
+        if (tipo === "Gympass") valorBaseInput.value = 7.34;
+        else if (tipo === "TotalPass") valorBaseInput.value = 7.38;
+        else if (tipo === "Mensal" && valorBaseInput.value === "7.34" || valorBaseInput.value === "7.38") {
+          // se voltar pra Mensal via seleção, limpa o valor (apenas se estiver com os autopreenchidos)
+          valorBaseInput.value = "";
+        }
+      }
+      // salvar dados (somente se não estivermos aplicando update remoto)
+      if (!suspendSave) salvarDadosDebounced();
+      calcularTotal();
+    });
+  });
+
+  // botões da linha
+  linha.querySelector(".removerBtn").addEventListener("click", (e) => {
+    if (!confirm("Remover este aluno?")) return;
+    e.target.closest("tr").remove();
+    if (!suspendSave) salvarDadosDebounced();
+    calcularTotal();
+  });
+
+  linha.querySelector(".limparBtn").addEventListener("click", () => {
+    if (!confirm("Limpar apenas os quadradinhos desta linha?")) return;
+    let checkboxes = linha.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach(cb => cb.checked = false);
+    if (!suspendSave) salvarDadosDebounced();
+    calcularTotal();
+  });
+
+  // se foi adicionado pela UI (não por dados remotos), salvamos imediatamente
+  if (!isRemote && !suspendSave) {
+    salvarDadosDebounced();
+    calcularTotal();
+  }
+}
+
+/* ============================
+   CÁLCULOS E EXPORT
+   ============================ */
+function calcularTotal() {
+  let linhas = corpoTabela.querySelectorAll("tr");
+  let totalGeral = 0;
+  linhas.forEach(linha => {
+    let valorBase = Number(linha.querySelectorAll('input[type="number"]')[0].value) || 0;
+    let valorExtra = Number(linha.querySelectorAll('input[type="number"]')[1].value) || 0;
+    let diasMarcados = linha.querySelectorAll('input[type="checkbox"]:checked').length;
+    let totalAluno = (valorBase * diasMarcados) + valorExtra;
+    linha.querySelector(".total").innerText = totalAluno.toFixed(2);
+    totalGeral += totalAluno;
+  });
+  document.getElementById("total").innerText = "💵 Total Final: R$ " + totalGeral.toFixed(2);
+}
+
+/* ============================
+   SALVAR / CARREGAR (DB)
+   ============================ */
+
+function coletarDadosDaTabela() {
+  let alunos = [];
+  corpoTabela.querySelectorAll("tr").forEach(linha => {
+    let inputs = linha.querySelectorAll("input, select");
+    let aluno = {
+      nome: inputs[0].value,
+      modalidade: inputs[1].value,
+      tipo: inputs[2].value,
+      valorBase: inputs[3].value,
+      valorExtra: inputs[4].value,
+      dias: Array.from(inputs).slice(5, 36).map(cb => cb.checked)
+    };
+    alunos.push(aluno);
+  });
+  return alunos;
+}
+
+let saveTimeout = null;
+function salvarDadosDebounced() {
+  // debounce rápido para não inundar DB se o usuário estiver digitando
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => salvarDados(), 300);
+}
+
+async function salvarDados() {
+  if (!colaboradorAtual) return;
+  if (suspendSave) return; // não salva se estamos aplicando update remoto
+
+  const alunos = coletarDadosDaTabela();
+  const periodo = document.getElementById("mesInput").value || "";
+
+  try {
+    // grava no DB (substitui o nó do colaborador)
+    await db.ref("colaboradores/" + colaboradorAtual).set({
+      alunos,
+      periodoSelecionado: periodo
+    });
+  } catch (err) {
+    console.error("Erro ao salvar no Firebase:", err);
+  }
+}
+
+/* ============================
+   LIMPARS
+   ============================ */
+function limparQuadradinhos() {
+  if (!confirm("Deseja realmente apagar todos os quadradinhos marcados?")) return;
+  let checkboxes = corpoTabela.querySelectorAll('input[type="checkbox"]');
+  checkboxes.forEach(cb => cb.checked = false);
+  if (!suspendSave) salvarDadosDebounced();
+  calcularTotal();
+}
+
+/* ============================
+   EXPORTAR
+   ============================ */
+function exportarExcel() {
+  calcularTotal();
+  let nomeArquivo = "Planilha_" + (colaboradorAtual || "SemColaborador") + ".xlsx";
+  let tabela = document.getElementById("planilha");
+  let dados = [];
+  tabela.querySelectorAll("tr").forEach(linha => {
+    let linhaDados = [];
+    linha.querySelectorAll("th, td").forEach(celula => {
+      if (celula.querySelector("input[type='text']")) linhaDados.push(celula.querySelector("input").value);
+      else if (celula.querySelector("input[type='number']")) linhaDados.push(celula.querySelector("input").value);
+      else if (celula.querySelector("select")) linhaDados.push(celula.querySelector("select").value);
+      else if (celula.querySelector("input[type='checkbox']")) linhaDados.push(celula.querySelector("input").checked ? "✓" : "");
+      else linhaDados.push(celula.innerText);
+    });
+    dados.push(linhaDados);
+  });
+  let planilha = XLSX.utils.aoa_to_sheet(dados);
+  let arquivo = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(arquivo, planilha, colaboradorAtual || "Sheet1");
+  XLSX.writeFile(arquivo, nomeArquivo);
+}
+
+/* ============================
+   INICIALIZAÇÃO E BOOT
+   ============================ */
+
+document.getElementById("mesInput").addEventListener("change", () => {
+  salvarPeriodo();
+  limparQuadradinhos();
+});
+
+// onload
+window.onload = async function() {
+  await carregarPeriodo();       // set periodo inicial (local fallback)
+  await carregarColaboradores(); // attach global listener -> irá popular select e dados
+  // calcularTotal ao fim (os listeners remotos cuidarão de atualizar UI)
+};
+</script>
+
+</body>
+</html>
