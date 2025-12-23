@@ -1,30 +1,158 @@
-allInputs.forEach(el => {
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planilha Automática - Múltiplos Colaboradores (Realtime)</title>
 
-  // 👇 campo NOME (texto)
-  if (el.type === "text") {
+<style>
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  margin: 40px;
+  background: linear-gradient(120deg, #f3e8ff, #e0f7ff);
+  color: #333;
+}
+h1 { text-align: center; color: #4b0082; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 20px;
+  font-size: 14px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  border-radius: 10px;
+  overflow: hidden;
+}
+th, td {
+  border: 1px solid #d6bcfa;
+  padding: 6px;
+  text-align: center;
+}
+th { background: #6b21a8; color: white; }
+tr:nth-child(even) { background: #faf5ff; }
+tr:nth-child(odd) { background: #ffffff; }
+input, select {
+  padding: 4px;
+  border: 1px solid #a78bfa;
+  border-radius: 4px;
+}
+button {
+  margin-top: 15px;
+  padding: 8px 16px;
+  background: #06b6d4;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:hover { background: #0891b2; }
+#total { margin-top: 15px; font-weight: bold; color: #4b0082; }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+</head>
+
+<body>
+
+<h1>📋 Planilha de Alunos e Colaboradores</h1>
+
+<table id="planilha">
+<thead>
+<tr>
+<th>Aluno</th>
+<th>Modalidade</th>
+<th>Tipo</th>
+<th>Valor Base</th>
+<th>Extra</th>
+<script>
+for (let i = 1; i <= 31; i++) document.write(`<th>${i}</th>`);
+</script>
+<th>Total</th>
+<th>Ações</th>
+</tr>
+</thead>
+<tbody id="corpoTabela"></tbody>
+</table>
+
+<button onclick="adicionarAluno()">➕ Adicionar Aluno</button>
+<button onclick="calcularTotal()">💰 Calcular Total</button>
+
+<p id="total"></p>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyD9Er27RZlKcFVVwrnWfo2xvWkPUla9JRs",
+  authDomain: "colaboradores-5a2a2.firebaseapp.com",
+  databaseURL: "https://colaboradores-5a2a2-default-rtdb.firebaseio.com",
+  projectId: "colaboradores-5a2a2"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let corpoTabela = document.getElementById("corpoTabela");
+let suspendSave = false;
+let saveTimeout = null;
+
+function adicionarAluno(dados = null) {
+  let linha = document.createElement("tr");
+  linha.innerHTML = `
+    <td><input type="text"></td>
+    <td>
+      <select>
+        <option>Yoga</option>
+        <option>Pilates</option>
+      </select>
+    </td>
+    <td>
+      <select class="tipoSelect">
+        <option>Mensal</option>
+        <option>Gympass</option>
+        <option>TotalPass</option>
+      </select>
+    </td>
+    <td><input type="number" step="0.01"></td>
+    <td><input type="number" step="0.01"></td>
+    ${Array.from({length:31},()=>'<td><input type="checkbox"></td>').join("")}
+    <td class="total">0</td>
+    <td><button onclick="this.closest('tr').remove(); calcularTotal()">❌</button></td>
+  `;
+  corpoTabela.appendChild(linha);
+
+  const allInputs = linha.querySelectorAll("input, select");
+  allInputs.forEach(el => {
     el.addEventListener("input", () => {
-      // NÃO salva enquanto digita
-    });
+      if (el.classList.contains("tipoSelect")) {
+        const tipo = el.value;
+        const valorBase = linha.querySelectorAll('input[type="number"]')[0];
+        const valorAtual = Number(valorBase.value);
 
-    el.addEventListener("blur", () => {
-      if (!suspendSave) salvarDadosDebounced();
-    });
-    return;
-  }
-
-  // 👇 outros campos continuam normais
-  el.addEventListener("input", () => {
-    if (el.classList && el.classList.contains("tipoSelect")) {
-      const tipo = el.value;
-      const valorBaseInput = linha.querySelectorAll('input[type="number"]')[0];
-      if (tipo === "Gympass") valorBaseInput.value = 7.34;
-      else if (tipo === "TotalPass") valorBaseInput.value = 7.38;
-      else if (tipo === "Mensal" && (valorBaseInput.value === "7.34" || valorBaseInput.value === "7.38")) {
-        valorBaseInput.value = "";
+        if (tipo === "Gympass") valorBase.value = 7.34;
+        else if (tipo === "TotalPass") valorBase.value = 7.38;
+        else if (tipo === "Mensal" && (valorAtual === 7.34 || valorAtual === 7.38)) {
+          valorBase.value = "";
+        }
       }
-    }
-
-    if (!suspendSave) salvarDadosDebounced();
-    calcularTotal();
+      calcularTotal();
+    });
   });
-});
+}
+
+function calcularTotal() {
+  let totalGeral = 0;
+  corpoTabela.querySelectorAll("tr").forEach(linha => {
+    let valorBase = Number(linha.querySelectorAll('input[type="number"]')[0].value) || 0;
+    let valorExtra = Number(linha.querySelectorAll('input[type="number"]')[1].value) || 0;
+    let dias = linha.querySelectorAll('input[type="checkbox"]:checked').length;
+    let total = (valorBase * dias) + valorExtra;
+    linha.querySelector(".total").innerText = total.toFixed(2);
+    totalGeral += total;
+  });
+  document.getElementById("total").innerText = "💵 Total: R$ " + totalGeral.toFixed(2);
+}
+</script>
+
+</body>
+</html>
+
