@@ -41,6 +41,8 @@ button {
   border-radius:5px;
   cursor:pointer;
 }
+button.danger { background:#dc2626 }
+button.danger:hover { background:#b91c1c }
 button:hover { background:#0891b2 }
 .total { font-weight:bold }
 </style>
@@ -56,6 +58,7 @@ button:hover { background:#0891b2 }
 <label>Colaborador:</label>
 <select id="colaboradorSelect" onchange="trocarColaborador()"></select>
 <button onclick="novoColaborador()">➕ Novo</button>
+<button class="danger" onclick="removerColaborador()">🗑️ Remover</button>
 
 <table>
 <thead>
@@ -93,6 +96,8 @@ const db = firebase.database();
 let colaboradorAtual = null;
 let suspendSave = false;
 
+/* ---------- COLABORADORES ---------- */
+
 function carregarColaboradores(){
   db.ref("colaboradores").on("value", snap=>{
     const dados = snap.val()||{};
@@ -122,7 +127,21 @@ function novoColaborador(){
   colaboradorAtual = nome;
 }
 
+function removerColaborador(){
+  if(!colaboradorAtual) return;
+  if(!confirm(`Deseja remover o colaborador "${colaboradorAtual}"?`)) return;
+
+  db.ref("colaboradores/"+colaboradorAtual).remove().then(()=>{
+    colaboradorAtual = null;
+    corpoTabela.innerHTML="";
+    document.getElementById("total").innerText="";
+  });
+}
+
+/* ---------- DADOS ---------- */
+
 function carregarDados(){
+  if(!colaboradorAtual) return;
   db.ref("colaboradores/"+colaboradorAtual).off();
   db.ref("colaboradores/"+colaboradorAtual).on("value", snap=>{
     suspendSave=true;
@@ -177,8 +196,7 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   tr.querySelectorAll("select,input[type=number],input[type=checkbox]")
     .forEach(e=>e.addEventListener("change",()=>{salvar();calcularTotal()}));
 
-  tr.querySelector(".nome")
-    .addEventListener("blur",()=>salvar());
+  tr.querySelector(".nome").addEventListener("blur",()=>salvar());
 
   if(!remoto) salvar();
 }
@@ -187,6 +205,8 @@ function limparChecks(){
   corpoTabela.querySelectorAll("input[type=checkbox]").forEach(c=>c.checked=false);
   salvar(); calcularTotal();
 }
+
+/* ---------- SALVAR / TOTAL ---------- */
 
 function salvar(){
   if(!colaboradorAtual || suspendSave) return;
