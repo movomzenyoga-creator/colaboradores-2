@@ -12,6 +12,14 @@ body {
   padding: 20px;
 }
 h1 { text-align:center; color:#4b0082 }
+
+.periodo {
+  text-align:center;
+  font-weight:bold;
+  margin-bottom:10px;
+  color:#4b0082;
+}
+
 table {
   width:100%;
   border-collapse:collapse;
@@ -26,6 +34,9 @@ th,td {
 th {
   background:#6b21a8;
   color:#fff;
+}
+td.fechamento {
+  background:#fef3c7;
 }
 input,select {
   border:1px solid #a78bfa;
@@ -43,6 +54,11 @@ button {
 }
 button:hover { background:#0891b2 }
 .total { font-weight:bold }
+.acoes {
+  display:flex;
+  gap:10px;
+  margin-top:10px;
+}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -52,6 +68,10 @@ button:hover { background:#0891b2 }
 <body>
 
 <h1>📋 Planilha Realtime</h1>
+
+<div class="periodo">
+  📆 Período: dia <strong>5</strong> ao dia <strong>4</strong>
+</div>
 
 <label>Colaborador:</label>
 <select id="colaboradorSelect" onchange="trocarColaborador()"></select>
@@ -66,7 +86,10 @@ button:hover { background:#0891b2 }
   <th>Valor Base</th>
   <th>Extra</th>
   <script>
-    for(let i=1;i<=31;i++) document.write(`<th>${i}</th>`)
+    for(let i=1;i<=31;i++){
+      const cls = i<=4 ? 'class="fechamento"' : '';
+      document.write(`<th ${cls}>${i}</th>`);
+    }
   </script>
   <th>Total</th>
   <th>Ações</th>
@@ -75,7 +98,11 @@ button:hover { background:#0891b2 }
 <tbody id="corpoTabela"></tbody>
 </table>
 
-<button onclick="adicionarAluno()">➕ Aluno</button>
+<div class="acoes">
+  <button onclick="adicionarAluno()">➕ Aluno</button>
+  <button onclick="limparDias()">🧹 Limpar dias</button>
+</div>
+
 <p id="total"></p>
 
 <script>
@@ -148,7 +175,7 @@ function adicionarAluno(data=null, remoto=false){
 <td><input type="text"></td>
 <td><select><option>Pilates</option></select></td>
 <td>
-  <select class="tipo">
+  <select>
     <option>Mensal</option>
     <option>Gympass</option>
     <option>TotalPass</option>
@@ -175,18 +202,13 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
     data.dias?.forEach((d,x)=>inputs[5+x].checked=d);
   }
 
-  // 🔧 FIX: valores automáticos
   tipoSelect.addEventListener("change", ()=>{
-    if(tipoSelect.value === "Gympass"){
-      valorBaseInput.value = 7.34;
-    } else if(tipoSelect.value === "TotalPass"){
-      valorBaseInput.value = 7.38;
-    }
+    if(tipoSelect.value==="Gympass") valorBaseInput.value=7.34;
+    if(tipoSelect.value==="TotalPass") valorBaseInput.value=7.38;
     if(!suspendSave) salvar();
     calcularTotal();
   });
 
-  // nome salva no blur
   nomeInput.addEventListener("blur", ()=>{ if(!suspendSave) salvar(); });
 
   inputs.forEach((c,idx)=>{
@@ -195,6 +217,12 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   });
 
   if(!remoto) salvar();
+}
+
+function limparDias(){
+  corpoTabela.querySelectorAll("input[type=checkbox]").forEach(c=>c.checked=false);
+  calcularTotal();
+  salvar();
 }
 
 function salvar(){
