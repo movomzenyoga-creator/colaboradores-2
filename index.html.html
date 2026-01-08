@@ -12,7 +12,6 @@ body {
   padding: 20px;
 }
 h1 { text-align:center; color:#4b0082 }
-.periodo { text-align:center; font-weight:bold; margin-top:5px }
 table {
   width:100%;
   border-collapse:collapse;
@@ -53,7 +52,6 @@ button:hover { background:#0891b2 }
 <body>
 
 <h1>📋 Planilha Realtime</h1>
-<div class="periodo">Período: dia 5 ao dia 4</div>
 
 <label>Colaborador:</label>
 <select id="colaboradorSelect" onchange="trocarColaborador()"></select>
@@ -120,45 +118,25 @@ function novoColaborador(){
   let nome = prompt("Nome do colaborador:");
   if(!nome) return;
   nome = nome.trim();
-
-  db.ref("colaboradores").once("value", snap=>{
-    const dados = snap.val()||{};
-    const existente = Object.keys(dados)
-      .find(n=>n.toLowerCase()===nome.toLowerCase());
-
-    if(existente){
-      colaboradorAtual = existente;
-      colaboradorSelect.value = existente;
-      carregarDados();
-    } else {
-      db.ref("colaboradores/"+nome).set({alunos:[]}).then(()=>{
-        colaboradorAtual = nome;
-        carregarColaboradores();
-        setTimeout(()=>{
-          colaboradorSelect.value = nome;
-          carregarDados();
-        },100);
-      });
-    }
-  });
+  db.ref("colaboradores/"+nome).set({alunos:[]});
+  colaboradorAtual = nome;
 }
 
 function carregarDados(){
   db.ref("colaboradores/"+colaboradorAtual).off();
   db.ref("colaboradores/"+colaboradorAtual).on("value", snap=>{
     suspendSave=true;
-    const dados=snap.val()||{};
     corpoTabela.innerHTML="";
-    (dados.alunos||[]).forEach(a=>adicionarAluno(a,true));
+    (snap.val()?.alunos||[]).forEach(a=>adicionarAluno(a,true));
     calcularTotal();
-    setTimeout(()=>suspendSave=false,50);
+    setTimeout(()=>suspendSave=false,100);
   });
 }
 
 function adicionarAluno(data=null, remoto=false){
   let tr=document.createElement("tr");
   tr.innerHTML=`
-<td><input></td>
+<td><input class="nome"></td>
 <td>
   <select>
     <option>Pilates</option>
@@ -166,13 +144,13 @@ function adicionarAluno(data=null, remoto=false){
 </td>
 <td>
   <select class="tipo">
-    <option value="Mensal">Mensal</option>
-    <option value="Gympass">Gympass</option>
-    <option value="TotalPass">TotalPass</option>
+    <option>Mensal</option>
+    <option>Gympass</option>
+    <option>TotalPass</option>
   </select>
 </td>
-<td><input type="number"></td>
-<td><input type="number"></td>
+<td><input type="number" class="base"></td>
+<td><input type="number" class="extra"></td>
 ${"<td><input type='checkbox'></td>".repeat(31)}
 <td class="total">0</td>
 <td><button onclick="this.closest('tr').remove();salvar()">❌</button></td>
@@ -180,28 +158,27 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   corpoTabela.appendChild(tr);
 
   if(data){
-    let i=tr.querySelectorAll("input,select");
-    i[0].value=data.nome||"";
-    i[2].value=data.tipo||"Mensal";
-    i[3].value=data.valorBase||0;
-    i[4].value=data.valorExtra||0;
-    data.dias?.forEach((d,x)=>i[5+x].checked=d);
+    tr.querySelector(".nome").value = data.nome||"";
+    tr.querySelector(".tipo").value = data.tipo||"Mensal";
+    tr.querySelector(".base").value = data.valorBase||"";
+    tr.querySelector(".extra").value = data.valorExtra||"";
+    data.dias?.forEach((d,i)=>tr.querySelectorAll("input[type=checkbox]")[i].checked=d);
   }
 
   tr.querySelector(".tipo").addEventListener("change",()=>{
-    let tipo = tr.querySelector(".tipo").value;
-    let valorBase = tr.querySelectorAll("input")[1];
-
-    if(tipo==="Gympass") valorBase.value = 7.34;
-    if(tipo==="TotalPass") valorBase.value = 7.38;
-    if(tipo==="Mensal") valorBase.value = "";
-
+    const tipo = tr.querySelector(".tipo").value;
+    const base = tr.querySelector(".base");
+    if(tipo==="Gympass") base.value=7.34;
+    if(tipo==="TotalPass") base.value=7.38;
+    if(tipo==="Mensal") base.value="";
     salvar(); calcularTotal();
   });
 
-  tr.querySelectorAll("input,select").forEach(e=>{
-    e.addEventListener("input",()=>{if(!suspendSave)salvar();calcularTotal()});
-  });
+  tr.querySelectorAll("select,input[type=number],input[type=checkbox]")
+    .forEach(e=>e.addEventListener("change",()=>{salvar();calcularTotal()}));
+
+  tr.querySelector(".nome")
+    .addEventListener("blur",()=>salvar());
 
   if(!remoto) salvar();
 }
@@ -212,17 +189,16 @@ function limparChecks(){
 }
 
 function salvar(){
-  if(!colaboradorAtual) return;
+  if(!colaboradorAtual || suspendSave) return;
   let alunos=[];
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
-    let i=tr.querySelectorAll("input,select");
     alunos.push({
-      nome:i[0].value,
+      nome: tr.querySelector(".nome").value,
       modalidade:"Pilates",
-      tipo:i[2].value,
-      valorBase:i[3].value,
-      valorExtra:i[4].value,
-      dias:[...i].slice(5,36).map(c=>c.checked)
+      tipo: tr.querySelector(".tipo").value,
+      valorBase: tr.querySelector(".base").value,
+      valorExtra: tr.querySelector(".extra").value,
+      dias:[...tr.querySelectorAll("input[type=checkbox]")].map(c=>c.checked)
     });
   });
   db.ref("colaboradores/"+colaboradorAtual).set({alunos});
@@ -231,8 +207,8 @@ function salvar(){
 function calcularTotal(){
   let total=0;
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
-    let v=Number(tr.querySelectorAll("input")[1].value)||0;
-    let e=Number(tr.querySelectorAll("input")[2].value)||0;
+    let v=Number(tr.querySelector(".base").value)||0;
+    let e=Number(tr.querySelector(".extra").value)||0;
     let d=tr.querySelectorAll("input[type=checkbox]:checked").length;
     let t=(v*d)+e;
     tr.querySelector(".total").innerText=t.toFixed(2);
