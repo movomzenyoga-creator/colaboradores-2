@@ -47,8 +47,8 @@ button:hover { background:#0891b2 }
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-
 </head>
+
 <body>
 
 <h1>📋 Planilha Realtime</h1>
@@ -109,7 +109,7 @@ function carregarColaboradores(){
 }
 
 function trocarColaborador(){
-  colaboradorAtual = document.getElementById("colaboradorSelect").value;
+  colaboradorAtual = colaboradorSelect.value;
   carregarDados();
 }
 
@@ -136,9 +136,8 @@ function carregarDados(){
   db.ref("colaboradores/"+colaboradorAtual).off();
   db.ref("colaboradores/"+colaboradorAtual).on("value", snap=>{
     suspendSave=true;
-    const dados=snap.val()||{};
     corpoTabela.innerHTML="";
-    (dados.alunos||[]).forEach(a=>adicionarAluno(a,true));
+    (snap.val()?.alunos||[]).forEach(a=>adicionarAluno(a,true));
     calcularTotal();
     setTimeout(()=>suspendSave=false,50);
   });
@@ -147,14 +146,10 @@ function carregarDados(){
 function adicionarAluno(data=null, remoto=false){
   let tr=document.createElement("tr");
   tr.innerHTML=`
-<td><input></td>
+<td><input type="text"></td>
+<td><select><option>Pilates</option></select></td>
 <td>
   <select>
-    <option>Pilates</option>
-  </select>
-</td>
-<td>
-  <select class="tipo">
     <option>Mensal</option>
     <option>Gympass</option>
     <option>TotalPass</option>
@@ -171,15 +166,21 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   if(data){
     let i=tr.querySelectorAll("input,select");
     i[0].value=data.nome||"";
-    i[1].value="Pilates";
     i[2].value=data.tipo||"Mensal";
     i[3].value=data.valorBase||0;
     i[4].value=data.valorExtra||0;
     data.dias?.forEach((d,x)=>i[5+x].checked=d);
   }
 
-  tr.querySelectorAll("input,select").forEach(e=>{
-    e.addEventListener("input",()=>{if(!suspendSave)salvar();calcularTotal()});
+  const campos = tr.querySelectorAll("input,select");
+
+  // 🔧 FIX: nome salva só no blur
+  campos[0].addEventListener("blur", ()=>{ if(!suspendSave) salvar(); });
+
+  // resto continua realtime
+  campos.forEach((c,idx)=>{
+    if(idx===0) return;
+    c.addEventListener("input",()=>{ if(!suspendSave) salvar(); calcularTotal(); });
   });
 
   if(!remoto) salvar();
@@ -220,5 +221,3 @@ window.onload=carregarColaboradores;
 
 </body>
 </html>
-
-
