@@ -12,14 +12,7 @@ body {
   padding: 20px;
 }
 h1 { text-align:center; color:#4b0082 }
-
-.periodo {
-  text-align:center;
-  font-weight:bold;
-  margin-bottom:10px;
-  color:#4b0082;
-}
-
+.periodo { text-align:center; font-weight:bold; margin-top:5px }
 table {
   width:100%;
   border-collapse:collapse;
@@ -34,9 +27,6 @@ th,td {
 th {
   background:#6b21a8;
   color:#fff;
-}
-td.fechamento {
-  background:#fef3c7;
 }
 input,select {
   border:1px solid #a78bfa;
@@ -54,11 +44,6 @@ button {
 }
 button:hover { background:#0891b2 }
 .total { font-weight:bold }
-.acoes {
-  display:flex;
-  gap:10px;
-  margin-top:10px;
-}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -68,10 +53,7 @@ button:hover { background:#0891b2 }
 <body>
 
 <h1>📋 Planilha Realtime</h1>
-
-<div class="periodo">
-  📆 Período: dia <strong>5</strong> ao dia <strong>4</strong>
-</div>
+<div class="periodo">Período: dia 5 ao dia 4</div>
 
 <label>Colaborador:</label>
 <select id="colaboradorSelect" onchange="trocarColaborador()"></select>
@@ -86,10 +68,7 @@ button:hover { background:#0891b2 }
   <th>Valor Base</th>
   <th>Extra</th>
   <script>
-    for(let i=1;i<=31;i++){
-      const cls = i<=4 ? 'class="fechamento"' : '';
-      document.write(`<th ${cls}>${i}</th>`);
-    }
+    for(let i=1;i<=31;i++) document.write(`<th>${i}</th>`)
   </script>
   <th>Total</th>
   <th>Ações</th>
@@ -98,10 +77,8 @@ button:hover { background:#0891b2 }
 <tbody id="corpoTabela"></tbody>
 </table>
 
-<div class="acoes">
-  <button onclick="adicionarAluno()">➕ Aluno</button>
-  <button onclick="limparDias()">🧹 Limpar dias</button>
-</div>
+<button onclick="adicionarAluno()">➕ Aluno</button>
+<button onclick="limparChecks()">🧹 Limpar quadradinhos</button>
 
 <p id="total"></p>
 
@@ -127,7 +104,7 @@ function carregarColaboradores(){
       o.value=n;o.textContent=n;
       colaboradorSelect.appendChild(o);
     });
-    if(!colaboradorAtual){
+    if(!colaboradorAtual && colaboradorSelect.value){
       colaboradorAtual = colaboradorSelect.value;
       carregarDados();
     }
@@ -145,16 +122,24 @@ function novoColaborador(){
   nome = nome.trim();
 
   db.ref("colaboradores").once("value", snap=>{
-    const nomes = Object.keys(snap.val()||{});
-    const existente = nomes.find(n=>n.toLowerCase()===nome.toLowerCase());
+    const dados = snap.val()||{};
+    const existente = Object.keys(dados)
+      .find(n=>n.toLowerCase()===nome.toLowerCase());
 
     if(existente){
       colaboradorAtual = existente;
+      colaboradorSelect.value = existente;
+      carregarDados();
     } else {
-      db.ref("colaboradores/"+nome).set({ alunos:[] });
-      colaboradorAtual = nome;
+      db.ref("colaboradores/"+nome).set({alunos:[]}).then(()=>{
+        colaboradorAtual = nome;
+        carregarColaboradores();
+        setTimeout(()=>{
+          colaboradorSelect.value = nome;
+          carregarDados();
+        },100);
+      });
     }
-    carregarDados();
   });
 }
 
@@ -162,8 +147,9 @@ function carregarDados(){
   db.ref("colaboradores/"+colaboradorAtual).off();
   db.ref("colaboradores/"+colaboradorAtual).on("value", snap=>{
     suspendSave=true;
+    const dados=snap.val()||{};
     corpoTabela.innerHTML="";
-    (snap.val()?.alunos||[]).forEach(a=>adicionarAluno(a,true));
+    (dados.alunos||[]).forEach(a=>adicionarAluno(a,true));
     calcularTotal();
     setTimeout(()=>suspendSave=false,50);
   });
@@ -172,57 +158,57 @@ function carregarDados(){
 function adicionarAluno(data=null, remoto=false){
   let tr=document.createElement("tr");
   tr.innerHTML=`
-<td><input type="text"></td>
-<td><select><option>Pilates</option></select></td>
+<td><input></td>
 <td>
   <select>
-    <option>Mensal</option>
-    <option>Gympass</option>
-    <option>TotalPass</option>
+    <option>Pilates</option>
   </select>
 </td>
-<td><input type="number" step="0.01"></td>
-<td><input type="number" step="0.01"></td>
+<td>
+  <select class="tipo">
+    <option value="Mensal">Mensal</option>
+    <option value="Gympass">Gympass</option>
+    <option value="TotalPass">TotalPass</option>
+  </select>
+</td>
+<td><input type="number"></td>
+<td><input type="number"></td>
 ${"<td><input type='checkbox'></td>".repeat(31)}
 <td class="total">0</td>
 <td><button onclick="this.closest('tr').remove();salvar()">❌</button></td>
 `;
   corpoTabela.appendChild(tr);
 
-  const inputs = tr.querySelectorAll("input,select");
-  const nomeInput = inputs[0];
-  const tipoSelect = inputs[2];
-  const valorBaseInput = inputs[3];
-
   if(data){
-    nomeInput.value = data.nome || "";
-    tipoSelect.value = data.tipo || "Mensal";
-    valorBaseInput.value = data.valorBase || 0;
-    inputs[4].value = data.valorExtra || 0;
-    data.dias?.forEach((d,x)=>inputs[5+x].checked=d);
+    let i=tr.querySelectorAll("input,select");
+    i[0].value=data.nome||"";
+    i[2].value=data.tipo||"Mensal";
+    i[3].value=data.valorBase||0;
+    i[4].value=data.valorExtra||0;
+    data.dias?.forEach((d,x)=>i[5+x].checked=d);
   }
 
-  tipoSelect.addEventListener("change", ()=>{
-    if(tipoSelect.value==="Gympass") valorBaseInput.value=7.34;
-    if(tipoSelect.value==="TotalPass") valorBaseInput.value=7.38;
-    if(!suspendSave) salvar();
-    calcularTotal();
+  tr.querySelector(".tipo").addEventListener("change",()=>{
+    let tipo = tr.querySelector(".tipo").value;
+    let valorBase = tr.querySelectorAll("input")[1];
+
+    if(tipo==="Gympass") valorBase.value = 7.34;
+    if(tipo==="TotalPass") valorBase.value = 7.38;
+    if(tipo==="Mensal") valorBase.value = "";
+
+    salvar(); calcularTotal();
   });
 
-  nomeInput.addEventListener("blur", ()=>{ if(!suspendSave) salvar(); });
-
-  inputs.forEach((c,idx)=>{
-    if(idx===0 || idx===2) return;
-    c.addEventListener("input", ()=>{ if(!suspendSave) salvar(); calcularTotal(); });
+  tr.querySelectorAll("input,select").forEach(e=>{
+    e.addEventListener("input",()=>{if(!suspendSave)salvar();calcularTotal()});
   });
 
   if(!remoto) salvar();
 }
 
-function limparDias(){
+function limparChecks(){
   corpoTabela.querySelectorAll("input[type=checkbox]").forEach(c=>c.checked=false);
-  calcularTotal();
-  salvar();
+  salvar(); calcularTotal();
 }
 
 function salvar(){
