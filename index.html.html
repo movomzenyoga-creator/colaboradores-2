@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Planilha Realtime</title>
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -110,26 +111,37 @@ function carregarColaboradores(){
   });
 }
 
-colaboradorSelect.onchange = () => {
+colaboradorSelect.onchange = ()=>{
   colaboradorAtual = colaboradorSelect.value;
   carregarDados();
 };
 
-mesSelect.onchange = () => {
+mesSelect.onchange = ()=>{
   mesAtual = mesSelect.value;
   carregarDados();
 };
 
-/* DADOS */
+/* DADOS (SUPORTA TODOS OS FORMATOS) */
 function carregarDados(){
   corpoTabela.innerHTML="";
-  if(!colaboradorAtual || !mesAtual) return;
+  if(!colaboradorAtual) return;
 
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`)
+  db.ref(`colaboradores/${colaboradorAtual}`)
     .once("value")
     .then(snap=>{
-      const alunos = snap.val() || {};
-      Object.values(alunos).forEach(a=>adicionarAluno(a,true));
+      const dados = snap.val() || {};
+      let alunos = [];
+
+      // 1️⃣ ciclo do mês
+      if(dados.ciclos && dados.ciclos[mesAtual] && dados.ciclos[mesAtual].alunos){
+        alunos = Object.values(dados.ciclos[mesAtual].alunos);
+      }
+      // 2️⃣ fallback antigo
+      else if(dados.alunos){
+        alunos = Object.values(dados.alunos);
+      }
+
+      alunos.forEach(a=>adicionarAluno(a,true));
       calcularTotal();
       calcularMedia();
     });
@@ -169,7 +181,7 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   if(!remoto) salvar();
 }
 
-/* SALVAR */
+/* SALVAR (SOMENTE NO CICLO ATUAL) */
 function salvar(){
   if(!colaboradorAtual || !mesAtual) return;
 
@@ -189,7 +201,7 @@ function salvar(){
     .set(alunos);
 }
 
-/* TOTAIS */
+/* TOTAL */
 function calcularTotal(){
   let totalMes=0;
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
@@ -207,7 +219,8 @@ function calcularTotal(){
 /* MÉDIA */
 function calcularMedia(){
   db.ref(`colaboradores/${colaboradorAtual}/ciclos`)
-    .once("value").then(snap=>{
+    .once("value")
+    .then(snap=>{
       let soma=0, cont=0;
       snap.forEach(m=>{
         let t=0;
@@ -226,7 +239,7 @@ function calcularMedia(){
 function novoColaborador(){
   let n=prompt("Nome do colaborador:");
   if(!n) return;
-  db.ref("colaboradores/"+n).set({ ciclos:{} });
+  db.ref("colaboradores/"+n).set({});
   carregarColaboradores();
 }
 function removerColaborador(){
