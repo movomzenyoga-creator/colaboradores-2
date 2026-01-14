@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Planilha Realtime por Mês</title>
+<title>Planilha por Mês</title>
 
 <style>
 body{font-family:Arial;background:linear-gradient(120deg,#f3e8ff,#e0f7ff);padding:20px}
@@ -28,6 +28,8 @@ button.danger{background:#dc2626}
 
 <label>Colaborador:</label>
 <select id="colaboradorSelect" onchange="trocarColaborador()"></select>
+<button onclick="novoColaborador()">➕ Novo</button>
+<button class="danger" onclick="removerColaborador()">🗑️ Remover</button>
 
 <label style="margin-left:10px">Mês:</label>
 <input type="month" id="mesSelect" onchange="trocarMes()">
@@ -81,50 +83,57 @@ function carregarColaboradores(){
     });
     if(!colaboradorAtual && colaboradorSelect.value){
       colaboradorAtual=colaboradorSelect.value;
-      carregarCiclo();
+      carregarDados();
     }
   });
 }
 
+function novoColaborador(){
+  let nome=prompt("Nome do colaborador:");
+  if(!nome)return;
+  db.ref("colaboradores/"+nome).set({alunosBase:[]});
+  colaboradorAtual=nome;
+}
+
+function removerColaborador(){
+  if(!colaboradorAtual)return;
+  if(!confirm(`Remover ${colaboradorAtual}?`))return;
+  db.ref("colaboradores/"+colaboradorAtual).remove();
+  colaboradorAtual=null;
+  corpoTabela.innerHTML="";
+}
+
 function trocarColaborador(){
   colaboradorAtual=colaboradorSelect.value;
-  carregarCiclo();
+  carregarDados();
 }
 
 function trocarMes(){
   cicloAtual=mesSelect.value;
-  carregarCiclo();
+  carregarDados();
 }
 
-/* ---------- CICLOS ---------- */
+/* ---------- DADOS ---------- */
 
-function carregarCiclo(){
-  if(!colaboradorAtual||!cicloAtual)return;
-  db.ref(`colaboradores/${colaboradorAtual}`).once("value",snap=>{
+function carregarDados(){
+  if(!colaboradorAtual)return;
+  db.ref("colaboradores/"+colaboradorAtual).once("value",snap=>{
     let dados=snap.val()||{};
+    let alunos=dados.alunosBase||[];
+    let ciclo=dados.ciclos?.[cicloAtual]?.registros||[];
 
-    // MIGRAÇÃO AUTOMÁTICA
-    if(dados.alunos && !dados.ciclos){
-      let total=0;
-      dados.alunos.forEach(a=>{
-        let d=(a.dias||[]).filter(Boolean).length;
-        total+=((Number(a.valorBase)||0)*d)+(Number(a.valorExtra)||0);
-      });
-      db.ref(`colaboradores/${colaboradorAtual}/ciclos/${cicloAtual}`)
-        .set({alunos:dados.alunos,totalMes:total});
-      db.ref(`colaboradores/${colaboradorAtual}/alunos`).remove();
-      return;
-    }
-
-    db.ref(`colaboradores/${colaboradorAtual}/ciclos/${cicloAtual}`)
-      .on("value",snapC=>{
-        suspendSave=true;
-        corpoTabela.innerHTML="";
-        (snapC.val()?.alunos||[]).forEach(a=>adicionarAluno(a,true));
-        calcularTotal();
-        calcularMedia();
-        setTimeout(()=>suspendSave=false,100);
-      });
+    suspendSave=true;
+    corpoTabela.innerHTML="";
+    alunos.forEach((a,i)=>{
+      adicionarAluno({
+        nome:a.nome,
+        modalidade:a.modalidade,
+        ...(ciclo[i]||{})
+      },true);
+    });
+    calcularTotal();
+    calcularMedia();
+    setTimeout(()=>suspendSave=false,100);
   });
 }
 
@@ -169,11 +178,14 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
 
 function salvar(){
   if(!colaboradorAtual||suspendSave)return;
-  let alunos=[];
+  let alunosBase=[];
+  let registros=[];
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
-    alunos.push({
+    alunosBase.push({
       nome:tr.querySelector(".nome").value,
-      modalidade:"Pilates",
+      modalidade:"Pilates"
+    });
+    registros.push({
       tipo:tr.querySelector(".tipo").value,
       valorBase:tr.querySelector(".base").value,
       valorExtra:tr.querySelector(".extra").value,
@@ -181,8 +193,12 @@ function salvar(){
     });
   });
   let total=calcularTotal(false);
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos/${cicloAtual}`)
-    .set({alunos,totalMes:total});
+  db.ref(`colaboradores/${colaboradorAtual}`).update({
+    alunosBase,
+    ciclos:{
+      [cicloAtual]:{registros,totalMes:total}
+    }
+  });
 }
 
 /* ---------- TOTAIS ---------- */
@@ -208,9 +224,8 @@ function calcularMedia(){
       soma+=Number(c.val().totalMes)||0;
       cont++;
     });
-    let media=cont? (soma/cont):0;
     document.getElementById("media").innerText=
-      "Média salarial: R$ "+media.toFixed(2);
+      "Média salarial: R$ "+(cont? (soma/cont):0).toFixed(2);
   });
 }
 
