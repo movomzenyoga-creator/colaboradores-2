@@ -3,48 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Planilha Realtime</title>
+<title>Planilha Realtime por Mês</title>
 
 <style>
-body {
-  font-family: Arial, sans-serif;
-  background: linear-gradient(120deg,#f3e8ff,#e0f7ff);
-  padding: 20px;
-}
-h1 { text-align:center; color:#4b0082 }
-table {
-  width:100%;
-  border-collapse:collapse;
-  margin-top:20px;
-  background:#fff;
-}
-th,td {
-  border:1px solid #d6bcfa;
-  padding:5px;
-  text-align:center;
-}
-th {
-  background:#6b21a8;
-  color:#fff;
-}
-input,select {
-  border:1px solid #a78bfa;
-  border-radius:4px;
-  padding:4px;
-}
-button {
-  margin-top:10px;
-  padding:6px 12px;
-  background:#06b6d4;
-  color:#fff;
-  border:none;
-  border-radius:5px;
-  cursor:pointer;
-}
-button.danger { background:#dc2626 }
-button.danger:hover { background:#b91c1c }
-button:hover { background:#0891b2 }
-.total { font-weight:bold }
+body{font-family:Arial;background:linear-gradient(120deg,#f3e8ff,#e0f7ff);padding:20px}
+h1{text-align:center;color:#4b0082}
+table{width:100%;border-collapse:collapse;margin-top:20px;background:#fff}
+th,td{border:1px solid #d6bcfa;padding:5px;text-align:center}
+th{background:#6b21a8;color:#fff}
+input,select{border:1px solid #a78bfa;border-radius:4px;padding:4px}
+button{margin-top:10px;padding:6px 12px;background:#06b6d4;color:#fff;border:none;border-radius:5px;cursor:pointer}
+button.danger{background:#dc2626}
+.total{font-weight:bold}
+.resumo{margin-top:10px;font-weight:bold}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
@@ -53,12 +24,13 @@ button:hover { background:#0891b2 }
 
 <body>
 
-<h1>📋 Planilha Realtime</h1>
+<h1>📋 Planilha por Mês</h1>
 
 <label>Colaborador:</label>
 <select id="colaboradorSelect" onchange="trocarColaborador()"></select>
-<button onclick="novoColaborador()">➕ Novo</button>
-<button class="danger" onclick="removerColaborador()">🗑️ Remover</button>
+
+<label style="margin-left:10px">Mês:</label>
+<input type="month" id="mesSelect" onchange="trocarMes()">
 
 <table>
 <thead>
@@ -68,9 +40,7 @@ button:hover { background:#0891b2 }
   <th>Tipo</th>
   <th>Valor Base</th>
   <th>Extra</th>
-  <script>
-    for(let i=1;i<=31;i++) document.write(`<th>${i}</th>`)
-  </script>
+  <script>for(let i=1;i<=31;i++)document.write(`<th>${i}</th>`)</script>
   <th>Total</th>
   <th>Ações</th>
 </tr>
@@ -79,94 +49,98 @@ button:hover { background:#0891b2 }
 </table>
 
 <button onclick="adicionarAluno()">➕ Aluno</button>
-<button onclick="limparChecks()">🧹 Limpar quadradinhos</button>
 
-<p id="total"></p>
+<p class="resumo" id="total"></p>
+<p class="resumo" id="media"></p>
 
 <script>
-const firebaseConfig = {
-  apiKey: "AIzaSyD9Er27RZlKcFVVwrnWfo2xvWkPUla9JRs",
-  authDomain: "colaboradores-5a2a2.firebaseapp.com",
-  databaseURL: "https://colaboradores-5a2a2-default-rtdb.firebaseio.com",
-  projectId: "colaboradores-5a2a2"
+const firebaseConfig={
+  apiKey:"AIzaSyD9Er27RZlKcFVVwrnWfo2xvWkPUla9JRs",
+  authDomain:"colaboradores-5a2a2.firebaseapp.com",
+  databaseURL:"https://colaboradores-5a2a2-default-rtdb.firebaseio.com",
+  projectId:"colaboradores-5a2a2"
 };
 firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const db=firebase.database();
 
-let colaboradorAtual = null;
-let suspendSave = false;
+let colaboradorAtual=null;
+let cicloAtual=new Date().toISOString().slice(0,7);
+let suspendSave=false;
+
+mesSelect.value=cicloAtual;
 
 /* ---------- COLABORADORES ---------- */
 
 function carregarColaboradores(){
-  db.ref("colaboradores").on("value", snap=>{
-    const dados = snap.val()||{};
+  db.ref("colaboradores").on("value",snap=>{
     colaboradorSelect.innerHTML="";
-    Object.keys(dados).forEach(n=>{
+    Object.keys(snap.val()||{}).forEach(n=>{
       let o=document.createElement("option");
       o.value=n;o.textContent=n;
       colaboradorSelect.appendChild(o);
     });
     if(!colaboradorAtual && colaboradorSelect.value){
-      colaboradorAtual = colaboradorSelect.value;
-      carregarDados();
+      colaboradorAtual=colaboradorSelect.value;
+      carregarCiclo();
     }
   });
 }
 
 function trocarColaborador(){
-  colaboradorAtual = colaboradorSelect.value;
-  carregarDados();
+  colaboradorAtual=colaboradorSelect.value;
+  carregarCiclo();
 }
 
-function novoColaborador(){
-  let nome = prompt("Nome do colaborador:");
-  if(!nome) return;
-  nome = nome.trim();
-  db.ref("colaboradores/"+nome).set({alunos:[]});
-  colaboradorAtual = nome;
+function trocarMes(){
+  cicloAtual=mesSelect.value;
+  carregarCiclo();
 }
 
-function removerColaborador(){
-  if(!colaboradorAtual) return;
-  if(!confirm(`Deseja remover o colaborador "${colaboradorAtual}"?`)) return;
+/* ---------- CICLOS ---------- */
 
-  db.ref("colaboradores/"+colaboradorAtual).remove().then(()=>{
-    colaboradorAtual = null;
-    corpoTabela.innerHTML="";
-    document.getElementById("total").innerText="";
+function carregarCiclo(){
+  if(!colaboradorAtual||!cicloAtual)return;
+  db.ref(`colaboradores/${colaboradorAtual}`).once("value",snap=>{
+    let dados=snap.val()||{};
+
+    // MIGRAÇÃO AUTOMÁTICA
+    if(dados.alunos && !dados.ciclos){
+      let total=0;
+      dados.alunos.forEach(a=>{
+        let d=(a.dias||[]).filter(Boolean).length;
+        total+=((Number(a.valorBase)||0)*d)+(Number(a.valorExtra)||0);
+      });
+      db.ref(`colaboradores/${colaboradorAtual}/ciclos/${cicloAtual}`)
+        .set({alunos:dados.alunos,totalMes:total});
+      db.ref(`colaboradores/${colaboradorAtual}/alunos`).remove();
+      return;
+    }
+
+    db.ref(`colaboradores/${colaboradorAtual}/ciclos/${cicloAtual}`)
+      .on("value",snapC=>{
+        suspendSave=true;
+        corpoTabela.innerHTML="";
+        (snapC.val()?.alunos||[]).forEach(a=>adicionarAluno(a,true));
+        calcularTotal();
+        calcularMedia();
+        setTimeout(()=>suspendSave=false,100);
+      });
   });
 }
 
-/* ---------- DADOS ---------- */
+/* ---------- ALUNOS ---------- */
 
-function carregarDados(){
-  if(!colaboradorAtual) return;
-  db.ref("colaboradores/"+colaboradorAtual).off();
-  db.ref("colaboradores/"+colaboradorAtual).on("value", snap=>{
-    suspendSave=true;
-    corpoTabela.innerHTML="";
-    (snap.val()?.alunos||[]).forEach(a=>adicionarAluno(a,true));
-    calcularTotal();
-    setTimeout(()=>suspendSave=false,100);
-  });
-}
-
-function adicionarAluno(data=null, remoto=false){
+function adicionarAluno(data=null,remoto=false){
   let tr=document.createElement("tr");
   tr.innerHTML=`
 <td><input class="nome"></td>
+<td>Pilates</td>
 <td>
-  <select>
-    <option>Pilates</option>
-  </select>
-</td>
-<td>
-  <select class="tipo">
-    <option>Mensal</option>
-    <option>Gympass</option>
-    <option>TotalPass</option>
-  </select>
+<select class="tipo">
+<option>Mensal</option>
+<option>Gympass</option>
+<option>TotalPass</option>
+</select>
 </td>
 <td><input type="number" class="base"></td>
 <td><input type="number" class="extra"></td>
@@ -177,54 +151,43 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   corpoTabela.appendChild(tr);
 
   if(data){
-    tr.querySelector(".nome").value = data.nome||"";
-    tr.querySelector(".tipo").value = data.tipo||"Mensal";
-    tr.querySelector(".base").value = data.valorBase||"";
-    tr.querySelector(".extra").value = data.valorExtra||"";
+    tr.querySelector(".nome").value=data.nome||"";
+    tr.querySelector(".tipo").value=data.tipo||"Mensal";
+    tr.querySelector(".base").value=data.valorBase||"";
+    tr.querySelector(".extra").value=data.valorExtra||"";
     data.dias?.forEach((d,i)=>tr.querySelectorAll("input[type=checkbox]")[i].checked=d);
   }
 
-  tr.querySelector(".tipo").addEventListener("change",()=>{
-    const tipo = tr.querySelector(".tipo").value;
-    const base = tr.querySelector(".base");
-    if(tipo==="Gympass") base.value=7.34;
-    if(tipo==="TotalPass") base.value=7.38;
-    if(tipo==="Mensal") base.value="";
-    salvar(); calcularTotal();
+  tr.querySelectorAll("input,select").forEach(e=>{
+    e.addEventListener("change",()=>{salvar();calcularTotal()});
   });
-
-  tr.querySelectorAll("select,input[type=number],input[type=checkbox]")
-    .forEach(e=>e.addEventListener("change",()=>{salvar();calcularTotal()}));
-
-  tr.querySelector(".nome").addEventListener("blur",()=>salvar());
 
   if(!remoto) salvar();
 }
 
-function limparChecks(){
-  corpoTabela.querySelectorAll("input[type=checkbox]").forEach(c=>c.checked=false);
-  salvar(); calcularTotal();
-}
-
-/* ---------- SALVAR / TOTAL ---------- */
+/* ---------- SALVAR ---------- */
 
 function salvar(){
-  if(!colaboradorAtual || suspendSave) return;
+  if(!colaboradorAtual||suspendSave)return;
   let alunos=[];
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
     alunos.push({
-      nome: tr.querySelector(".nome").value,
+      nome:tr.querySelector(".nome").value,
       modalidade:"Pilates",
-      tipo: tr.querySelector(".tipo").value,
-      valorBase: tr.querySelector(".base").value,
-      valorExtra: tr.querySelector(".extra").value,
+      tipo:tr.querySelector(".tipo").value,
+      valorBase:tr.querySelector(".base").value,
+      valorExtra:tr.querySelector(".extra").value,
       dias:[...tr.querySelectorAll("input[type=checkbox]")].map(c=>c.checked)
     });
   });
-  db.ref("colaboradores/"+colaboradorAtual).set({alunos});
+  let total=calcularTotal(false);
+  db.ref(`colaboradores/${colaboradorAtual}/ciclos/${cicloAtual}`)
+    .set({alunos,totalMes:total});
 }
 
-function calcularTotal(){
+/* ---------- TOTAIS ---------- */
+
+function calcularTotal(update=true){
   let total=0;
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
     let v=Number(tr.querySelector(".base").value)||0;
@@ -234,7 +197,21 @@ function calcularTotal(){
     tr.querySelector(".total").innerText=t.toFixed(2);
     total+=t;
   });
-  document.getElementById("total").innerText="Total: R$ "+total.toFixed(2);
+  if(update)document.getElementById("total").innerText="Total do mês: R$ "+total.toFixed(2);
+  return total;
+}
+
+function calcularMedia(){
+  db.ref(`colaboradores/${colaboradorAtual}/ciclos`).once("value",snap=>{
+    let soma=0,cont=0;
+    snap.forEach(c=>{
+      soma+=Number(c.val().totalMes)||0;
+      cont++;
+    });
+    let media=cont? (soma/cont):0;
+    document.getElementById("media").innerText=
+      "Média salarial: R$ "+media.toFixed(2);
+  });
 }
 
 window.onload=carregarColaboradores;
