@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Planilha Realtime</title>
 
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-
 <style>
 body {
   font-family: Arial, sans-serif;
@@ -45,8 +42,12 @@ button {
   cursor:pointer;
 }
 button.danger { background:#dc2626 }
+button:hover { background:#0891b2 }
 .total { font-weight:bold }
 </style>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
 </head>
 
 <body>
@@ -54,12 +55,13 @@ button.danger { background:#dc2626 }
 <h1>📋 Planilha Realtime</h1>
 
 <label>Colaborador:</label>
-<select id="colaboradorSelect"></select>
+<select id="colaboradorSelect" onchange="trocarColaborador()"></select>
 <button onclick="novoColaborador()">➕ Novo</button>
 <button class="danger" onclick="removerColaborador()">🗑️ Remover</button>
 
-<label style="margin-left:15px">Mês:</label>
-<input type="month" id="mesSelect">
+<label style="margin-left:20px;">Mês:</label>
+<select id="mesSelect" onchange="trocarMes()"></select>
+<button onclick="novoMes()">📆 Novo mês</button>
 
 <table>
 <thead>
@@ -80,75 +82,146 @@ button.danger { background:#dc2626 }
 </table>
 
 <button onclick="adicionarAluno()">➕ Aluno</button>
+<button onclick="limparChecks()">🧹 Limpar quadradinhos</button>
 
 <p id="total"></p>
 <p id="media"></p>
 
 <script>
-/* FIREBASE */
-firebase.initializeApp({
+/* ================= FIREBASE ================= */
+const firebaseConfig = {
   apiKey: "AIzaSyD9Er27RZlKcFVVwrnWfo2xvWkPUla9JRs",
-  databaseURL: "https://colaboradores-5a2a2-default-rtdb.firebaseio.com"
-});
+  authDomain: "colaboradores-5a2a2.firebaseapp.com",
+  databaseURL: "https://colaboradores-5a2a2-default-rtdb.firebaseio.com",
+  projectId: "colaboradores-5a2a2"
+};
+
+firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
-/* ESTADO */
 let colaboradorAtual = null;
-let mesAtual = new Date().toISOString().slice(0,7);
-mesSelect.value = mesAtual;
+let mesAtual = null;
+let suspendSave = false;
 
-/* COLABORADORES */
+/* ================= COLABORADORES ================= */
+
 function carregarColaboradores(){
-  db.ref("colaboradores").once("value").then(snap=>{
+  db.ref("colaboradores").on("value", snap=>{
+    const dados = snap.val() || {};
     colaboradorSelect.innerHTML="";
-    Object.keys(snap.val()||{}).forEach(nome=>{
+    Object.keys(dados).forEach(nome=>{
       let o=document.createElement("option");
-      o.value=o.textContent=nome;
+      o.value=nome;
+      o.textContent=nome;
       colaboradorSelect.appendChild(o);
     });
-    colaboradorAtual = colaboradorSelect.value;
-    carregarDados();
+    if(!colaboradorAtual && colaboradorSelect.value){
+      colaboradorAtual = colaboradorSelect.value;
+      carregarMeses();
+    }
   });
 }
 
-colaboradorSelect.onchange = ()=>{
+function trocarColaborador(){
   colaboradorAtual = colaboradorSelect.value;
-  carregarDados();
-};
-
-mesSelect.onchange = ()=>{
-  mesAtual = mesSelect.value;
-  carregarDados();
-};
-
-/* DADOS (SUPORTA TODOS OS FORMATOS) */
-function carregarDados(){
-  corpoTabela.innerHTML="";
-  if(!colaboradorAtual) return;
-
-  db.ref(`colaboradores/${colaboradorAtual}`)
-    .once("value")
-    .then(snap=>{
-      const dados = snap.val() || {};
-      let alunos = [];
-
-      // 1️⃣ ciclo do mês
-      if(dados.ciclos && dados.ciclos[mesAtual] && dados.ciclos[mesAtual].alunos){
-        alunos = Object.values(dados.ciclos[mesAtual].alunos);
-      }
-      // 2️⃣ fallback antigo
-      else if(dados.alunos){
-        alunos = Object.values(dados.alunos);
-      }
-
-      alunos.forEach(a=>adicionarAluno(a,true));
-      calcularTotal();
-      calcularMedia();
-    });
+  mesAtual = null;
+  carregarMeses();
 }
 
-/* ALUNO */
-function adicionarAluno(data={}, remoto=false){
+function novoColaborador(){
+  let nome = prompt("Nome do colaborador:");
+  if(!nome) return;
+  db.ref("colaboradores/"+nome).set({ meses:{} });
+  colaboradorAtual = nome;
+}
+
+function removerColaborador(){
+  if(!confirm("Remover colaborador?")) return;
+  db.ref("colaboradores/"+colaboradorAtual).remove();
+  colaboradorAtual = null;
+  corpoTabela.innerHTML="";
+  mesSelect.innerHTML="";
+  document.getElementById("total").innerText="";
+  document.getElementById("media").innerText="";
+}
+
+/* ================= MESES ================= */
+
+function carregarMeses(){
+  if(!colaboradorAtual) return;
+
+  db.ref(`colaboradores/${colaboradorAtual}/meses`).off();
+  db.ref(`colaboradores/${colaboradorAtual}/meses`).on("value", snap=>{
+    const meses = snap.val() || {};
+    mesSelect.innerHTML="";
+
+    Object.keys(meses).sort().forEach(m=>{
+      let o=document.createElement("option");
+      o.value=m;
+      o.textContent=m;
+      mesSelect.appendChild(o);
+    });
+
+    if(!mesAtual && mesSelect.value){
+      mesAtual = mesSelect.value;
+      carregarDados();
+    }
+
+    calcularMedia();
+  });
+}
+
+function trocarMes(){
+  mesAtual = mesSelect.value;
+  carregarDados();
+}
+
+function novoMes(){
+  let mes = prompt("Mês (ex: 2025-02):");
+  if(!mes || !colaboradorAtual) return;
+
+  const refMeses = db.ref(`colaboradores/${colaboradorAtual}/meses`);
+
+  refMeses.once("value", snap=>{
+    const meses = snap.val() || {};
+    const lista = Object.keys(meses).sort();
+
+    let alunosCopiados = [];
+
+    if(lista.length){
+      const ultimoMes = lista[lista.length - 1];
+      const alunosAntigos = meses[ultimoMes].alunos || [];
+
+      alunosCopiados = alunosAntigos.map(a => ({
+        nome: a.nome || "",
+        tipo: a.tipo || "Mensal",
+        valorBase: a.valorBase || "",
+        valorExtra: a.valorExtra || "",
+        dias: Array(31).fill(false)
+      }));
+    }
+
+    refMeses.child(mes).set({ alunos: alunosCopiados });
+    mesAtual = mes;
+  });
+}
+
+/* ================= DADOS ================= */
+
+function carregarDados(){
+  if(!colaboradorAtual || !mesAtual) return;
+
+  db.ref(`colaboradores/${colaboradorAtual}/meses/${mesAtual}`).off();
+  db.ref(`colaboradores/${colaboradorAtual}/meses/${mesAtual}`).on("value", snap=>{
+    suspendSave = true;
+    corpoTabela.innerHTML="";
+    (snap.val()?.alunos || []).forEach(a=>adicionarAluno(a,true));
+    calcularTotal();
+    suspendSave = false;
+  });
+}
+
+function adicionarAluno(data=null, remoto=false){
   let tr=document.createElement("tr");
   tr.innerHTML=`
 <td><input class="nome"></td>
@@ -168,28 +241,40 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
 `;
   corpoTabela.appendChild(tr);
 
-  tr.querySelector(".nome").value = data.nome || "";
-  tr.querySelector(".tipo").value = data.tipo || "Mensal";
-  tr.querySelector(".base").value = data.valorBase || "";
-  tr.querySelector(".extra").value = data.valorExtra || "";
-  data.dias?.forEach((d,i)=>tr.querySelectorAll("input[type=checkbox]")[i].checked=d);
+  if(data){
+    tr.querySelector(".nome").value = data.nome || "";
+    tr.querySelector(".tipo").value = data.tipo || "Mensal";
+    tr.querySelector(".base").value = data.valorBase || "";
+    tr.querySelector(".extra").value = data.valorExtra || "";
+    data.dias?.forEach((d,i)=>tr.querySelectorAll("input[type=checkbox]")[i].checked=d);
+  }
 
-  tr.querySelectorAll("input,select").forEach(e =>
-    e.onchange = ()=>{ salvar(); calcularTotal(); }
-  );
+  tr.querySelectorAll("input,select").forEach(e=>{
+    e.addEventListener("change",()=>{ salvar(); calcularTotal(); });
+  });
 
   if(!remoto) salvar();
 }
 
-/* SALVAR (SOMENTE NO CICLO ATUAL) */
-function salvar(){
+/* ================= FUNÇÕES PEDIDAS ================= */
+
+function limparChecks(){
   if(!colaboradorAtual || !mesAtual) return;
+  document.querySelectorAll("#corpoTabela input[type=checkbox]")
+    .forEach(c => c.checked = false);
+  salvar();
+  calcularTotal();
+}
+
+/* ================= SALVAR / TOTAIS ================= */
+
+function salvar(){
+  if(suspendSave) return;
 
   let alunos=[];
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
     alunos.push({
       nome: tr.querySelector(".nome").value,
-      modalidade: "Pilates",
       tipo: tr.querySelector(".tipo").value,
       valorBase: tr.querySelector(".base").value,
       valorExtra: tr.querySelector(".extra").value,
@@ -197,55 +282,42 @@ function salvar(){
     });
   });
 
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`)
-    .set(alunos);
+  db.ref(`colaboradores/${colaboradorAtual}/meses/${mesAtual}`)
+    .set({ alunos });
 }
 
-/* TOTAL */
 function calcularTotal(){
-  let totalMes=0;
+  let total=0;
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
-    let b=+tr.querySelector(".base").value||0;
-    let e=+tr.querySelector(".extra").value||0;
-    let d=tr.querySelectorAll("input[type=checkbox]:checked").length;
-    let t=(b*d)+e;
+    let base=Number(tr.querySelector(".base").value)||0;
+    let extra=Number(tr.querySelector(".extra").value)||0;
+    let dias=tr.querySelectorAll("input[type=checkbox]:checked").length;
+    let t=(base*dias)+extra;
     tr.querySelector(".total").innerText=t.toFixed(2);
-    totalMes+=t;
+    total+=t;
   });
-  total.innerText="Total do mês: R$ "+totalMes.toFixed(2);
-  return totalMes;
+  document.getElementById("total").innerText =
+    "Total do mês: R$ " + total.toFixed(2);
 }
 
-/* MÉDIA */
 function calcularMedia(){
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos`)
-    .once("value")
-    .then(snap=>{
-      let soma=0, cont=0;
-      snap.forEach(m=>{
-        let t=0;
-        Object.values(m.val().alunos||{}).forEach(a=>{
-          let d=(a.dias||[]).filter(Boolean).length;
-          t+=(+a.valorBase||0)*d+(+a.valorExtra||0);
-        });
-        soma+=t;
-        cont++;
-      });
-      media.innerText="Média salarial: R$ "+(cont?soma/cont:0).toFixed(2);
-    });
-}
+  db.ref(`colaboradores/${colaboradorAtual}/meses`).once("value", snap=>{
+    let soma=0, qtd=0;
 
-/* CRUD */
-function novoColaborador(){
-  let n=prompt("Nome do colaborador:");
-  if(!n) return;
-  db.ref("colaboradores/"+n).set({});
-  carregarColaboradores();
-}
-function removerColaborador(){
-  if(confirm("Remover colaborador?"))
-    db.ref("colaboradores/"+colaboradorAtual).remove();
-  carregarColaboradores();
+    Object.values(snap.val()||{}).forEach(m=>{
+      let totalMes=0;
+      (m.alunos||[]).forEach(a=>{
+        let dias=(a.dias||[]).filter(d=>d).length;
+        totalMes += (Number(a.valorBase)||0)*dias +
+                    (Number(a.valorExtra)||0);
+      });
+      soma+=totalMes;
+      qtd++;
+    });
+
+    document.getElementById("media").innerText =
+      qtd ? "Média salarial: R$ " + (soma/qtd).toFixed(2) : "";
+  });
 }
 
 window.onload = carregarColaboradores;
@@ -253,5 +325,10 @@ window.onload = carregarColaboradores;
 
 </body>
 </html>
+
+
+</body>
+</html>
+
 
 
