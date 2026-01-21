@@ -116,18 +116,31 @@ function carregarColaboradores(){
 colaboradorSelect.onchange = ()=>{ colaboradorAtual = colaboradorSelect.value; carregarDados(); };
 mesSelect.onchange = ()=>{ mesAtual = mesSelect.value; carregarDados(); };
 
-/* DADOS */
+/* CARREGAR DADOS (NOVO + ANTIGO) */
 function carregarDados(){
   corpoTabela.innerHTML="";
   if(!colaboradorAtual) return;
 
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`)
-    .once("value")
-    .then(snap=>{
-      (snap.val()||[]).forEach(a=>adicionarAluno(a,true));
+  const refCiclo = db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`);
+  const refAntigo = db.ref(`colaboradores/${colaboradorAtual}/alunos`);
+
+  refCiclo.once("value").then(snap=>{
+    if(snap.exists()){
+      snap.val().forEach(a => adicionarAluno(a,true));
       calcularTotal();
       calcularMedia();
-    });
+    } else {
+      refAntigo.once("value").then(oldSnap=>{
+        if(oldSnap.exists()){
+          const alunos = Object.values(oldSnap.val());
+          alunos.forEach(a => adicionarAluno(a,true));
+          refCiclo.set(alunos); // migra automaticamente
+        }
+        calcularTotal();
+        calcularMedia();
+      });
+    }
+  });
 }
 
 /* ALUNO */
@@ -157,7 +170,6 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   tr.querySelector(".extra").value = data.valorExtra || "";
   (data.dias||[]).forEach((d,i)=>tr.querySelectorAll("input[type=checkbox]")[i].checked=d);
 
-  /* TIPO → VALOR AUTOMÁTICO */
   tr.querySelector(".tipo").onchange = e=>{
     const base = tr.querySelector(".base");
     if(e.target.value === "Gympass") base.value = 7.34;
@@ -251,3 +263,4 @@ window.onload = carregarColaboradores;
 
 </body>
 </html>
+
