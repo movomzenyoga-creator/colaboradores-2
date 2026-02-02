@@ -12,19 +12,26 @@
 body {
   font-family: Arial, sans-serif;
   background: linear-gradient(120deg,#f3e8ff,#e0f7ff);
-  padding: 20px;
+  padding: 15px;
 }
 h1 { text-align:center; color:#4b0082 }
+.controls {
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:center;
+}
 table {
   width:100%;
   border-collapse:collapse;
-  margin-top:20px;
+  margin-top:15px;
   background:#fff;
 }
 th,td {
   border:1px solid #d6bcfa;
-  padding:5px;
+  padding:4px;
   text-align:center;
+  font-size:13px;
 }
 th {
   background:#6b21a8;
@@ -36,8 +43,7 @@ input,select {
   padding:4px;
 }
 button {
-  margin-top:10px;
-  padding:6px 12px;
+  padding:6px 10px;
   background:#06b6d4;
   color:#fff;
   border:none;
@@ -46,6 +52,13 @@ button {
 }
 button.danger { background:#dc2626 }
 .total { font-weight:bold }
+.wrapper { overflow-x:auto }
+.resumo {
+  margin-top:10px;
+  background:#fff;
+  padding:10px;
+  border-radius:8px;
+}
 </style>
 </head>
 
@@ -53,127 +66,160 @@ button.danger { background:#dc2626 }
 
 <h1>📋 Planilha Realtime</h1>
 
-<label>Colaborador:</label>
-<select id="colaboradorSelect"></select>
-<button onclick="novoColaborador()">➕ Novo</button>
-<button class="danger" onclick="removerColaborador()">🗑️ Remover</button>
+<div class="controls">
+  <label>Colaborador:</label>
+  <select id="colaboradorSelect"></select>
+  <button onclick="novoColaborador()">➕</button>
+  <button class="danger" onclick="removerColaborador()">🗑️</button>
 
-<label style="margin-left:15px">Mês:</label>
-<input type="month" id="mesSelect">
+  <label>Mês:</label>
+  <input type="month" id="mesSelect">
+</div>
 
+<div class="wrapper">
 <table>
-<thead>
-<tr id="cabecalho"></tr>
-</thead>
+<thead><tr id="cabecalho"></tr></thead>
 <tbody id="corpoTabela"></tbody>
 </table>
+</div>
 
 <button onclick="adicionarAluno()">➕ Aluno</button>
 <button onclick="limparDias()">🧹 Limpar dias</button>
 
-<p id="total"></p>
-<p id="media"></p>
+<div class="resumo">
+  <p id="total"></p>
+  <p id="media"></p>
+</div>
 
 <script>
-/* FIREBASE */
+/* ================= FIREBASE ================= */
 firebase.initializeApp({
-  apiKey: "SUA_API_KEY",
-  databaseURL: "SUA_DATABASE_URL"
+  apiKey: "AIzaSyD9Er27RZlKcFVVwrnWfo2xvWkPUla9JRs",
+  databaseURL: "https://colaboradores-5a2a2-default-rtdb.firebaseio.com"
 });
 const db = firebase.database();
 
-/* CABEÇALHO */
-cabecalho.innerHTML = `
-<th>Aluno</th>
-<th>Modalidade</th>
-<th>Tipo</th>
-<th>Valor Base</th>
-<th>Extra</th>
-${Array.from({length:31},(_,i)=>`<th>${i+1}</th>`).join("")}
-<th>Total</th>
-<th>Ações</th>
-`;
-
-/* ESTADO */
+/* ================= ESTADO ================= */
 let colaboradorAtual = null;
 let mesAtual = new Date().toISOString().slice(0,7);
+let debounce = null;
 mesSelect.value = mesAtual;
 
-/* COLABORADORES */
+/* ================= UTIL ================= */
+function diasNoMes(ano,mes){
+  return new Date(ano,mes,0).getDate();
+}
+
+/* ================= CABEÇALHO ================= */
+function montarCabecalho(){
+  const [ano,mes] = mesAtual.split("-");
+  const dias = diasNoMes(ano,mes);
+  cabecalho.innerHTML = `
+    <th>Aluno</th>
+    <th>Tipo</th>
+    <th>Base</th>
+    <th>Extra</th>
+    ${Array.from({length:dias},(_,i)=>`<th>${i+1}</th>`).join("")}
+    <th>Total</th>
+    <th></th>
+  `;
+}
+
+/* ================= COLABORADORES ================= */
 function carregarColaboradores(){
   db.ref("colaboradores").once("value").then(snap=>{
     colaboradorSelect.innerHTML="";
-    Object.keys(snap.val()||{}).forEach(nome=>{
+    Object.keys(snap.val()||{}).forEach(n=>{
       let o=document.createElement("option");
-      o.value=o.textContent=nome;
+      o.value=o.textContent=n;
       colaboradorSelect.appendChild(o);
     });
     colaboradorAtual = colaboradorSelect.value;
     carregarDados();
+    calcularMedia();
   });
 }
 
-colaboradorSelect.onchange = ()=>{ colaboradorAtual = colaboradorSelect.value; carregarDados(); };
-mesSelect.onchange = ()=>{ mesAtual = mesSelect.value; carregarDados(); };
+colaboradorSelect.onchange = ()=>{
+  colaboradorAtual = colaboradorSelect.value;
+  carregarDados();
+  calcularMedia();
+};
 
-/* CARREGAR DADOS */
+mesSelect.onchange = ()=>{
+  mesAtual = mesSelect.value;
+  carregarDados();
+};
+
+/* ================= CARREGAR DADOS (MODELO JANEIRO) ================= */
 function carregarDados(){
   corpoTabela.innerHTML="";
   if(!colaboradorAtual) return;
 
-  const refMes = db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`);
-  const refJaneiro = db.ref(`colaboradores/${colaboradorAtual}/ciclos/2026-01/alunos`);
+  montarCabecalho();
 
-  refMes.once("value").then(snap=>{
+  const refAtual = db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`);
+  const refModelo = db.ref(`colaboradores/${colaboradorAtual}/ciclos/2026-01/alunos`);
+
+  refAtual.once("value").then(snap=>{
+    // ✅ mês já existe
     if(snap.exists()){
-      snap.val().forEach(a=>adicionarAluno(a,true));
-      calcularTotal(); calcularMedia();
-    } else {
-      refJaneiro.once("value").then(jan=>{
-        if(!jan.exists()) return;
-        const alunosBase = jan.val().map(a=>({
+      Object.values(snap.val()).forEach(a=>adicionarAluno(a,true));
+      calcularTotal();
+    }
+    // 🌱 mês vazio → copia janeiro
+    else {
+      refModelo.once("value").then(modelSnap=>{
+        if(!modelSnap.exists()) return;
+
+        const alunosBase = Object.values(modelSnap.val()).map(a=>({
           nome: a.nome || "",
-          modalidade: "Pilates",
           tipo: a.tipo || "Mensal",
           valorBase: a.valorBase || "",
-          valorExtra: "", // 🔥 EXTRA NÃO COPIA
-          dias: []
+          valorExtra: "",   // 🔥 EXTRA NÃO VEM
+          dias: []          // dias vazios
         }));
-        refMes.set(alunosBase);
-        alunosBase.forEach(a=>adicionarAluno(a,true));
-        calcularTotal(); calcularMedia();
+
+        refAtual.set(alunosBase).then(()=>{
+          alunosBase.forEach(a=>adicionarAluno(a,true));
+          calcularTotal();
+        });
       });
     }
   });
 }
 
-/* ALUNO */
+/* ================= ALUNO ================= */
 function adicionarAluno(data={}, remoto=false){
+  const [ano,mes]=mesAtual.split("-");
+  const dias=diasNoMes(ano,mes);
+
   let tr=document.createElement("tr");
   tr.innerHTML=`
-<td><input class="nome"></td>
-<td>Pilates</td>
-<td>
-  <select class="tipo">
-    <option>Mensal</option>
-    <option>Gympass</option>
-    <option>TotalPass</option>
-  </select>
-</td>
-<td><input type="number" step="0.01" class="base"></td>
-<td><input type="number" step="0.01" class="extra"></td>
-${"<td><input type='checkbox'></td>".repeat(31)}
-<td class="total">0</td>
-<td><button onclick="this.closest('tr').remove();salvar()">❌</button></td>
-`;
+    <td><input class="nome"></td>
+    <td>
+      <select class="tipo">
+        <option>Mensal</option>
+        <option>Gympass</option>
+        <option>TotalPass</option>
+      </select>
+    </td>
+    <td><input type="number" class="base"></td>
+    <td><input type="number" class="extra"></td>
+    ${"<td><input type='checkbox'></td>".repeat(dias)}
+    <td class="total">0</td>
+    <td><button onclick="this.closest('tr').remove();salvar()">❌</button></td>
+  `;
   corpoTabela.appendChild(tr);
 
   tr.querySelector(".nome").value = data.nome || "";
   tr.querySelector(".tipo").value = data.tipo || "Mensal";
   tr.querySelector(".base").value = data.valorBase || "";
   tr.querySelector(".extra").value = data.valorExtra || "";
-
-  (data.dias||[]).forEach((d,i)=>tr.querySelectorAll("input[type=checkbox]")[i].checked=d);
+  (data.dias||[]).forEach((d,i)=>{
+    const c = tr.querySelectorAll("input[type=checkbox]")[i];
+    if(c) c.checked = d;
+  });
 
   tr.querySelectorAll("input,select").forEach(i=>{
     i.onchange = ()=>{ salvar(); calcularTotal(); };
@@ -182,32 +228,32 @@ ${"<td><input type='checkbox'></td>".repeat(31)}
   if(!remoto) salvar();
 }
 
-/* LIMPAR DIAS */
+/* ================= LIMPAR ================= */
 function limparDias(){
   corpoTabela.querySelectorAll("input[type=checkbox]").forEach(c=>c.checked=false);
-  salvar(); calcularTotal();
+  salvar();
+  calcularTotal();
 }
 
-/* SALVAR */
+/* ================= SALVAR (DEBOUNCE) ================= */
 function salvar(){
-  if(!colaboradorAtual || !mesAtual) return;
-
-  let alunos=[];
-  corpoTabela.querySelectorAll("tr").forEach(tr=>{
-    alunos.push({
-      nome: tr.querySelector(".nome").value,
-      modalidade: "Pilates",
-      tipo: tr.querySelector(".tipo").value,
-      valorBase: tr.querySelector(".base").value,
-      valorExtra: tr.querySelector(".extra").value || "",
-      dias: [...tr.querySelectorAll("input[type=checkbox]")].map(c=>c.checked)
+  clearTimeout(debounce);
+  debounce = setTimeout(()=>{
+    let alunos=[];
+    corpoTabela.querySelectorAll("tr").forEach(tr=>{
+      alunos.push({
+        nome: tr.querySelector(".nome").value,
+        tipo: tr.querySelector(".tipo").value,
+        valorBase: tr.querySelector(".base").value,
+        valorExtra: tr.querySelector(".extra").value,
+        dias: [...tr.querySelectorAll("input[type=checkbox]")].map(c=>c.checked)
+      });
     });
-  });
-
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`).set(alunos);
+    db.ref(`colaboradores/${colaboradorAtual}/ciclos/${mesAtual}/alunos`).set(alunos);
+  },500);
 }
 
-/* TOTAL */
+/* ================= TOTAL ================= */
 function calcularTotal(){
   let totalMes=0;
   corpoTabela.querySelectorAll("tr").forEach(tr=>{
@@ -218,34 +264,34 @@ function calcularTotal(){
     tr.querySelector(".total").innerText=t.toFixed(2);
     totalMes+=t;
   });
-  total.innerText="Total do mês: R$ "+totalMes.toFixed(2);
+  total.innerText="💰 Total do mês: R$ "+totalMes.toFixed(2);
 }
 
-/* MÉDIA */
+/* ================= MÉDIA ================= */
 function calcularMedia(){
-  db.ref(`colaboradores/${colaboradorAtual}/ciclos`)
-    .once("value")
-    .then(snap=>{
-      let soma=0, cont=0;
-      snap.forEach(m=>{
-        let alunos=m.val().alunos||[];
-        let t=alunos.reduce((a,x)=>{
-          let d=(x.dias||[]).filter(Boolean).length;
-          return a+(+x.valorBase||0)*d+(+x.valorExtra||0);
-        },0);
-        soma+=t; cont++;
+  if(!colaboradorAtual) return;
+  db.ref(`colaboradores/${colaboradorAtual}/ciclos`).once("value").then(snap=>{
+    let soma=0,cont=0;
+    snap.forEach(m=>{
+      Object.values(m.val().alunos||{}).forEach(a=>{
+        let d=(a.dias||[]).filter(Boolean).length;
+        soma+=(+a.valorBase||0)*d+(+a.valorExtra||0);
       });
-      media.innerText="Média salarial: R$ "+(cont?soma/cont:0).toFixed(2);
+      cont++;
     });
+    media.innerText="📊 Média salarial: R$ "+(cont?soma/cont:0).toFixed(2);
+  });
 }
 
-/* CRUD */
+/* ================= CRUD ================= */
 function novoColaborador(){
-  let n=prompt("Nome do colaborador:");
-  if(!n) return;
-  db.ref("colaboradores/"+n).set({});
-  carregarColaboradores();
+  let n=prompt("Nome:");
+  if(n){
+    db.ref("colaboradores/"+n).set({});
+    carregarColaboradores();
+  }
 }
+
 function removerColaborador(){
   if(confirm("Remover colaborador?")){
     db.ref("colaboradores/"+colaboradorAtual).remove();
@@ -255,6 +301,5 @@ function removerColaborador(){
 
 window.onload = carregarColaboradores;
 </script>
-
 </body>
 </html>
