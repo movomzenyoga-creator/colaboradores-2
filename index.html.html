@@ -173,8 +173,11 @@ function carregarDados(){
         if(!modelSnap.exists()) return;
 
         const alunosBase = Object.values(modelSnap.val()).map(a=>({
-          ...a,
-          dias: [] // dias começam vazios
+          nome: a.nome || "",
+          tipo: a.tipo || "Mensal",
+          valorBase: a.valorBase || "",
+          valorExtra: "",   // 🔥 EXTRA NÃO VEM
+          dias: []          // dias vazios
         }));
 
         refAtual.set(alunosBase).then(()=>{
